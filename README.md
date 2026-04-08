@@ -147,7 +147,7 @@ You'll see output like:
 [agent] BTCUSD @ $66,422.6
 [2026-03-27T11:02:50.000Z] HOLD BTCUSD @ $66,422.60
   Confidence: 50%
-  Reason: No clear momentum (0.09% change vs ±0.06% threshold). Holding current position.
+  Reason: No clear momentum (0.09% change vs ±0.04% threshold). Holding current position.
   Market: bid=66421, ask=66421.1, spread=0.0002%, vol=2764.35
 
 ────────────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ CHECKPOINT — HOLD BTCUSD
 [agent] Checkpoint posted to ValidationRegistry: 0xa6993f19...
 ```
 
-The agent warms up for the first 5 ticks (collecting price samples), then evaluates momentum. Default threshold is **±0.06%** over that window (override with `MOMENTUM_THRESHOLD_PCT`; lower = more trades). The **~$69k** figure in the dashboard is the **live BTC/USD spot** from Kraken (REST or CLI), not agent profit. A **downward sparkline** only means the market moved down over recent checkpoints — while on **HOLD** with no position, that is not a trading loss.
+The agent warms up for the first **N** ticks (`MOMENTUM_WINDOW`, default **3**), each tick using **Kraken ticker** (CLI or public REST). Momentum default is **±0.04%** over that window — tune `MOMENTUM_THRESHOLD_PCT` (lower → more trades) and `POLL_INTERVAL_MS` (lower → more on-chain posts, more gas). `TRADE_AMOUNT_USD` is capped at **500** for the shared RiskRouter. The **~$69k** figure in the dashboard is **live spot**, not agent profit.
 
 **Kraken CLI (mentor alignment):** use **`BTCUSD`** as the pair, **`-o json`**, **`paper buy/sell`** for paper (no `--sandbox` flag), **`order buy` / `order sell`** for live (`KRAKEN_LIVE=true`). See `tutorial/03-kraken-connection.md`.
 

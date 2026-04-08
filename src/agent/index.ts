@@ -263,8 +263,16 @@ export async function runAgent(strategy: TradingStrategy) {
 // ── SWAP YOUR STRATEGY HERE ─────────────────────────────────────────────────
 // import { LLMStrategy } from "./strategy.js";
 // const strategy = new LLMStrategy();
-const _momTh = parseFloat(process.env.MOMENTUM_THRESHOLD_PCT || "0.06");
-const strategy = new MomentumStrategy(5, 100, Number.isFinite(_momTh) ? _momTh : 0.06);
+const _momTh = parseFloat(process.env.MOMENTUM_THRESHOLD_PCT || "0.04");
+const _win = parseInt(process.env.MOMENTUM_WINDOW || "3", 10);
+const _usd = parseFloat(process.env.TRADE_AMOUNT_USD || "150");
+const windowSize = Number.isFinite(_win) && _win >= 2 ? _win : 3;
+const tradeUsd = Number.isFinite(_usd) && _usd > 0 && _usd <= 500 ? _usd : 150;
+const strategy = new MomentumStrategy(
+  windowSize,
+  tradeUsd,
+  Number.isFinite(_momTh) ? _momTh : 0.04
+);
 // ────────────────────────────────────────────────────────────────────────────
 
 runAgent(strategy).catch((err) => {
