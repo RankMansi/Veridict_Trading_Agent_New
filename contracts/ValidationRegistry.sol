@@ -5,7 +5,8 @@ import "./AgentRegistry.sol";
 
 /**
  * @title ValidationRegistry
- * @notice On-chain validation artifact store for ERC-8004 agents.
+ * @notice On-chain validation artifact store for ERC-8004 agents — same interface as the
+ *         shared Sepolia contract (Path A: 0x92bF63E5C7Ac6980f237a7164Ab413BE226187F1).
  *
  * Validators (whitelisted addresses, or open depending on configuration) post
  * scored attestations for specific agent checkpoints. An attestation links:
@@ -14,13 +15,12 @@ import "./AgentRegistry.sol";
  *   - A validator score
  *   - Optional proof bytes (TEE attestation, zkML proof, or off-chain hash)
  *
- * This is where "Proof of Work means actual computational work" — attestations
- * can carry cryptographic proofs that the agent ran correctly and honestly.
+ * Shared Sepolia bytecode: `postEIP712Attestation` was implemented as `this.postAttestation(...)`,
+ * which breaks `msg.sender` / `onlyValidator` for whitelisted operators. Clients must call
+ * `postAttestation(..., proofType=EIP712, proof=empty)` directly against the live registry.
+ * This repo’s Solidity uses internal `_postAttestation` so both entry points work on **new** deploys.
  *
- * For the hackathon:
- *   - The lablab.ai leaderboard reads validator scores from this registry
- *   - Your EIP-712 signed checkpoints are submitted here as the checkpointHash
- *   - Validator scores feed into the on-chain reputation + leaderboard ranking
+ * Hackathon: leaderboard reads validator scores; checkpointHash is your EIP-712 digest.
  */
 contract ValidationRegistry {
     // ─────────────────────────────────────────────────────────────────────────
@@ -136,6 +136,30 @@ contract ValidationRegistry {
         bytes calldata proof,
         string calldata notes
     ) external onlyValidator {
+        _postAttestation(agentId, checkpointHash, score, proofType, proof, notes);
+    }
+
+    /**
+     * @notice Convenience: post an EIP-712 checkpoint attestation.
+     *         Must use internal path — external `this.postAttestation` would break msg.sender / onlyValidator.
+     */
+    function postEIP712Attestation(
+        uint256 agentId,
+        bytes32 checkpointHash,
+        uint8 score,
+        string calldata notes
+    ) external onlyValidator {
+        _postAttestation(agentId, checkpointHash, score, ProofType.EIP712, bytes(""), notes);
+    }
+
+    function _postAttestation(
+        uint256 agentId,
+        bytes32 checkpointHash,
+        uint8 score,
+        ProofType proofType,
+        bytes calldata proof,
+        string calldata notes
+    ) internal {
         require(agentRegistry.isRegistered(agentId), "ValidationRegistry: agent not registered");
         require(checkpointHash != bytes32(0), "ValidationRegistry: checkpointHash required");
         require(score <= 100, "ValidationRegistry: score must be 0-100");
@@ -156,19 +180,6 @@ contract ValidationRegistry {
         attestationCount[agentId]++;
 
         emit AttestationPosted(agentId, msg.sender, checkpointHash, score, proofType);
-    }
-
-    /**
-     * @notice Convenience: post an EIP-712 checkpoint attestation.
-     *         The checkpoint hash is the EIP-712 digest that the agent signed.
-     */
-    function postEIP712Attestation(
-        uint256 agentId,
-        bytes32 checkpointHash,
-        uint8 score,
-        string calldata notes
-    ) external onlyValidator {
-        this.postAttestation(agentId, checkpointHash, score, ProofType.EIP712, bytes(""), notes);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

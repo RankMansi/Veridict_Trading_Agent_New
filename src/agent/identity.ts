@@ -50,10 +50,23 @@ export async function getAgentId(
 ): Promise<bigint> {
   if (_agentId !== null) return _agentId;
 
-  // Check env first
+  // Check env first — still verify registry when RPC is available (matches "subsequent runs" contract)
   if (process.env.AGENT_ID) {
     _agentId = BigInt(process.env.AGENT_ID);
     console.log(`[identity] Loaded agentId from env: ${_agentId}`);
+    try {
+      const provider = operatorSigner.provider;
+      if (provider) {
+        const ok = await verifyRegistration(provider, registryAddress, _agentId);
+        if (!ok) {
+          console.warn(
+            "[identity] Warning: agentId not registered, inactive, or registry read failed — confirm AGENT_ID and AGENT_REGISTRY_ADDRESS"
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("[identity] Registration check skipped:", (e as Error).message);
+    }
     return _agentId;
   }
 

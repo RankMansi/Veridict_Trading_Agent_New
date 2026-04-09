@@ -10,6 +10,34 @@ dotenv.config();
 
 import { ethers } from "ethers";
 
+function readGasLimitCap(envKey: string, defaultDecimal: string): bigint {
+  const raw = process.env[envKey]?.trim();
+  if (!raw) return BigInt(defaultDecimal);
+  try {
+    const v = raw.startsWith("0x") || raw.startsWith("0X") ? BigInt(raw) : BigInt(raw);
+    return v > 0n ? v : BigInt(defaultDecimal);
+  } catch {
+    return BigInt(defaultDecimal);
+  }
+}
+
+async function gasOverrides(
+  provider: ethers.Provider,
+  txReq: { to: string; data: string; from: string },
+  cap: bigint,
+  floor: bigint
+): Promise<ethers.Overrides> {
+  try {
+    const est = await provider.estimateGas(txReq);
+    const buffered = (est * 125n) / 100n;
+    let g = buffered < floor ? floor : buffered;
+    if (g > cap) g = cap;
+    return { gasLimit: g };
+  } catch {
+    return { gasLimit: cap };
+  }
+}
+
 const VAULT_ABI = [
   "function claimAllocation(uint256 agentId) external",
   "function getBalance(uint256 agentId) external view returns (uint256)",
@@ -48,7 +76,15 @@ async function main() {
   console.log(`allocationPerTeam: ${ethers.formatEther(alloc)} ETH`);
 
   console.log("Sending claimAllocation...");
-  const tx = await vault.claimAllocation(agentId);
+  const from = await signer.getAddress();
+  const pop = await vault.claimAllocation.populateTransaction(agentId);
+  const overrides = await gasOverrides(
+    provider,
+    { to: pop.to as string, data: pop.data ?? "0x", from },
+    readGasLimitCap("HACKATHON_GAS_LIMIT_CLAIM", "300000"),
+    80000n
+  );
+  const tx = await vault.claimAllocation(agentId, overrides);
   console.log(`Tx: ${tx.hash}`);
   await tx.wait();
   console.log("✅ claimAllocation confirmed");

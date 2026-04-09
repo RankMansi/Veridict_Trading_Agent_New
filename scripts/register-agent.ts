@@ -21,6 +21,34 @@ dotenv.config();
 import { ethers } from "ethers";
 import { getAgentId } from "../src/agent/identity";
 
+function readGasLimitCap(envKey: string, defaultDecimal: string): bigint {
+  const raw = process.env[envKey]?.trim();
+  if (!raw) return BigInt(defaultDecimal);
+  try {
+    const v = raw.startsWith("0x") || raw.startsWith("0X") ? BigInt(raw) : BigInt(raw);
+    return v > 0n ? v : BigInt(defaultDecimal);
+  } catch {
+    return BigInt(defaultDecimal);
+  }
+}
+
+async function gasOverrides(
+  provider: ethers.Provider,
+  txReq: { to: string; data: string; from: string },
+  cap: bigint,
+  floor: bigint
+): Promise<ethers.Overrides> {
+  try {
+    const est = await provider.estimateGas(txReq);
+    const buffered = (est * 125n) / 100n;
+    let g = buffered < floor ? floor : buffered;
+    if (g > cap) g = cap;
+    return { gasLimit: g };
+  } catch {
+    return { gasLimit: cap };
+  }
+}
+
 async function main() {
   const rpcUrl          = process.env.SEPOLIA_RPC_URL;
   const privateKey      = process.env.PRIVATE_KEY;
@@ -86,12 +114,18 @@ async function main() {
     try {
       const router = new ethers.Contract(routerAddress, RISK_ROUTER_ABI, operatorSigner);
       console.log(`\nSetting risk params on RiskRouter...`);
-      const tx = await router.setRiskParams(
-        agentId,
-        BigInt(50000),
-        BigInt(500),
-        BigInt(10)
+      const maxPos = BigInt(50000);
+      const dd = BigInt(500);
+      const tph = BigInt(10);
+      const from = await operatorSigner.getAddress();
+      const pop = await router.setRiskParams.populateTransaction(agentId, maxPos, dd, tph);
+      const overrides = await gasOverrides(
+        provider,
+        { to: pop.to as string, data: pop.data ?? "0x", from },
+        readGasLimitCap("HACKATHON_GAS_LIMIT_ROUTER", "450000"),
+        120000n
       );
+      const tx = await router.setRiskParams(agentId, maxPos, dd, tph, overrides);
       await tx.wait();
       console.log(`Risk params set: maxPosition=$500, maxDrawdown=5%, maxTrades/hr=10`);
     } catch (e) {

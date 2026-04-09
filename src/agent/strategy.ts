@@ -5,7 +5,7 @@
  * HOW TO SWAP IN YOUR OWN MODEL
  * ─────────────────────────────────────────────────────────────────────────────
  * 1. Create a class that implements TradingStrategy
- * 2. In your analyze() method, call your LLM / algorithm with the MarketData
+ * 2. In your analyze() method, call your model / rules with the MarketData
  * 3. Return a TradeDecision — the rest of the agent picks it up automatically
  *
  * Example with Claude:
@@ -21,20 +21,28 @@
 import { MarketData, TradeDecision, TradingStrategy } from "../types/index";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Simple momentum strategy (no LLM — good for testing the template)
+// Momentum strategy (default — no external inference API)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class MomentumStrategy implements TradingStrategy {
   private priceHistory: number[] = [];
   private readonly windowSize: number;
   private readonly tradeAmountUsd: number;
-  /** Min |Δprice| % over the window to trigger BUY/SELL (below → HOLD). Lower = more trades. */
+  /** Min upward Δprice % (over window) to allow BUY; symmetric magnitude for SELL on downside. */
   private readonly momentumThresholdPct: number;
+  /** Max (ask−bid)/mid % required for BUY (tight spread filter). */
+  private readonly maxSpreadPctForBuy: number;
 
-  constructor(windowSize = 3, tradeAmountUsd = 150, momentumThresholdPct = 0.04) {
+  constructor(
+    windowSize = 5,
+    tradeAmountUsd = 100,
+    momentumThresholdPct = 0.5,
+    maxSpreadPctForBuy = 0.1
+  ) {
     this.windowSize = windowSize;
     this.tradeAmountUsd = tradeAmountUsd;
     this.momentumThresholdPct = momentumThresholdPct;
+    this.maxSpreadPctForBuy = maxSpreadPctForBuy;
   }
 
   async analyze(data: MarketData): Promise<TradeDecision> {
@@ -44,12 +52,13 @@ export class MomentumStrategy implements TradingStrategy {
     }
 
     if (this.priceHistory.length < this.windowSize) {
+      const warm = 0.78 + 0.04 * (this.priceHistory.length / Math.max(1, this.windowSize));
       return {
         action: "HOLD",
         asset: data.pair.replace("USD", ""),
         pair: data.pair,
         amount: 0,
-        confidence: 0.5,
+        confidence: Math.min(0.9, warm),
         reasoning: `Warming up: have ${this.priceHistory.length}/${this.windowSize} price samples. Holding.`,
       };
     }
@@ -60,23 +69,22 @@ export class MomentumStrategy implements TradingStrategy {
     const spread = ((data.ask - data.bid) / data.price) * 100;
 
     let action: TradeDecision["action"] = "HOLD";
-    let confidence = 0.5;
+    let confidence = 0.85;
     let reasoning = "";
 
     const th = this.momentumThresholdPct;
-    /** BUY also requires reasonable spread; threshold % relaxed vs old 0.1 so REST/CLI both pass more often */
-    const maxSpreadPctForBuy = 0.25;
-    if (changePct > th && spread < maxSpreadPctForBuy) {
+    const maxSp = this.maxSpreadPctForBuy;
+
+    if (changePct > th && spread < maxSp) {
       action = "BUY";
-      /** Align posted validation (confidence×100) with leaderboard ~95–98 on successful trades */
-      confidence = Math.min(0.98, Math.max(0.95, 0.82 + Math.abs(changePct) / 6));
-      reasoning = `Upward momentum: price rose ${changePct.toFixed(2)}% over last ${this.windowSize} ticks (threshold ${th}%). Spread is tight at ${spread.toFixed(3)}%. Buying.`;
+      confidence = Math.min(0.9, 0.5 + Math.abs(changePct) / 10);
+      reasoning = `Upward momentum: price rose ${changePct.toFixed(2)}% over last ${this.windowSize} ticks. Spread is tight at ${spread.toFixed(3)}%. Buying.`;
     } else if (changePct < -th) {
       action = "SELL";
-      confidence = Math.min(0.98, Math.max(0.95, 0.82 + Math.abs(changePct) / 6));
-      reasoning = `Downward momentum: price fell ${Math.abs(changePct).toFixed(2)}% over last ${this.windowSize} ticks (threshold ${th}%). Selling.`;
+      confidence = Math.min(0.9, 0.5 + Math.abs(changePct) / 10);
+      reasoning = `Downward momentum: price fell ${Math.abs(changePct).toFixed(2)}% over last ${this.windowSize} ticks. Selling to avoid further loss.`;
     } else {
-      reasoning = `No clear momentum (${changePct.toFixed(2)}% change vs ±${th}% threshold). Holding current position.`;
+      reasoning = `No clear momentum (${changePct.toFixed(2)}% change). Holding current position.`;
     }
 
     return {

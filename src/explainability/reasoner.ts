@@ -16,13 +16,15 @@ import { MarketData, TradeCheckpoint, TradeDecision } from "../types/index";
 /**
  * Produce a single human-readable explanation string for a trade decision.
  */
+function formatUsdPrice(p: number): string {
+  if (typeof p !== "number" || !Number.isFinite(p)) return String(p);
+  return p.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
 export function formatExplanation(decision: TradeDecision, market: MarketData): string {
   const action = decision.action;
   const pair = market.pair;
-  const price = market.price.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
+  const price = formatUsdPrice(market.price);
   const confidencePct = (decision.confidence * 100).toFixed(0);
   const spread = (((market.ask - market.bid) / market.price) * 100).toFixed(4);
   const time = new Date().toISOString();

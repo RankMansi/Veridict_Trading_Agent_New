@@ -1,19 +1,41 @@
 /**
- * ValidationRegistry — TypeScript integration layer
+ * ValidationRegistry — same shared Sepolia registry (`VALIDATION_REGISTRY_ADDRESS` in .env).
  *
- * The agent uses this to submit its EIP-712 signed checkpoints as validation
- * artifacts. Validators (and the hackathon leaderboard) read attestation scores
- * from here to rank agents by validation quality, not just raw PnL.
- *
- * Flow:
- *   1. Agent generates EIP-712 signed checkpoint (checkpoint.ts)
- *   2. Agent computes the EIP-712 digest (checkpointHash)
- *   3. Agent posts self-attestation: postAttestation(agentId, checkpointHash, ...)
- *   4. Third-party validators optionally post their own scores on the same hash
- *   5. Hackathon leaderboard queries getAverageValidationScore() per agent
+ * Registered **agent operators** sign with `PRIVATE_KEY` (operator). We call **`postAttestation`**
+ * with `proofType = EIP712 (1)` and empty `proof` — not `postEIP712Attestation` — because the
+ * deployed contract’s `postEIP712Attestation` uses `this.postAttestation` and reverts for
+ * whitelisted EOAs. Set `POST_VALIDATION_ATTESTATION=false` to skip posts (gas / debugging).
  */
 
 import { ethers } from "ethers";
+
+function readGasLimitCap(envKey: string, defaultDecimal: string): bigint {
+  const raw = process.env[envKey]?.trim();
+  if (!raw) return BigInt(defaultDecimal);
+  try {
+    const v = raw.startsWith("0x") || raw.startsWith("0X") ? BigInt(raw) : BigInt(raw);
+    return v > 0n ? v : BigInt(defaultDecimal);
+  } catch {
+    return BigInt(defaultDecimal);
+  }
+}
+
+async function gasOverrides(
+  provider: ethers.Provider,
+  txReq: { to: string; data: string; from: string },
+  cap: bigint,
+  floor: bigint
+): Promise<ethers.Overrides> {
+  try {
+    const est = await provider.estimateGas(txReq);
+    const buffered = (est * 125n) / 100n;
+    let g = buffered < floor ? floor : buffered;
+    if (g > cap) g = cap;
+    return { gasLimit: g };
+  } catch {
+    return { gasLimit: cap };
+  }
+}
 
 const VALIDATION_ABI = [
   "function postAttestation(uint256 agentId, bytes32 checkpointHash, uint8 score, uint8 proofType, bytes proof, string notes) external",
@@ -65,7 +87,46 @@ export class ValidationRegistryClient {
     score: number,
     notes: string
   ): Promise<ethers.TransactionReceipt> {
-    const tx = await this.contract.postEIP712Attestation(agentId, checkpointHash, score, notes);
+    /**
+     * Call `postAttestation` directly with ProofType.EIP712 — NOT `postEIP712Attestation`.
+     * Deployed ValidationRegistry uses `this.postAttestation(...)` inside postEIP712Attestation,
+     * which re-enters as an external call so msg.sender becomes the contract and onlyValidator fails
+     * for whitelisted operators. Direct postAttestation keeps msg.sender as the operator.
+     */
+    const proofBytes = "0x";
+    const runner = this.contract.runner;
+    let overrides: ethers.Overrides = {};
+    if (runner && "getAddress" in runner) {
+      const provider = runner.provider;
+      if (provider) {
+        const signer = runner as ethers.Signer;
+        const from = await signer.getAddress();
+        const pop = await this.contract.postAttestation.populateTransaction(
+          agentId,
+          checkpointHash,
+          score,
+          ProofType.EIP712,
+          proofBytes,
+          notes
+        );
+        const cap = readGasLimitCap("HACKATHON_GAS_LIMIT_VALIDATION", "2500000");
+        overrides = await gasOverrides(
+          provider,
+          { to: pop.to as string, data: pop.data ?? "0x", from },
+          cap,
+          120000n
+        );
+      }
+    }
+    const tx = await this.contract.postAttestation(
+      agentId,
+      checkpointHash,
+      score,
+      ProofType.EIP712,
+      proofBytes,
+      notes,
+      overrides
+    );
     return tx.wait();
   }
 
@@ -81,8 +142,40 @@ export class ValidationRegistryClient {
     notes: string
   ): Promise<ethers.TransactionReceipt> {
     const proofBytes = typeof proof === "string" ? proof : ethers.hexlify(proof);
+
+    const runner = this.contract.runner;
+    let overrides: ethers.Overrides = {};
+    if (runner && "getAddress" in runner) {
+      const provider = runner.provider;
+      if (provider) {
+        const signer = runner as ethers.Signer;
+        const from = await signer.getAddress();
+        const pop = await this.contract.postAttestation.populateTransaction(
+          agentId,
+          checkpointHash,
+          score,
+          proofType,
+          proofBytes,
+          notes
+        );
+        const cap = readGasLimitCap("HACKATHON_GAS_LIMIT_VALIDATION", "2500000");
+        overrides = await gasOverrides(
+          provider,
+          { to: pop.to as string, data: pop.data ?? "0x", from },
+          cap,
+          120000n
+        );
+      }
+    }
+
     const tx = await this.contract.postAttestation(
-      agentId, checkpointHash, score, proofType, proofBytes, notes
+      agentId,
+      checkpointHash,
+      score,
+      proofType,
+      proofBytes,
+      notes,
+      overrides
     );
     return tx.wait();
   }

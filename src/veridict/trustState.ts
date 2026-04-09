@@ -1,8 +1,10 @@
 /**
- * VERIDICT — trust degradation after mechanical gate hard-blocks (Delegation Gap signal).
- * Full SAE metrics live in the Python stack; this mirrors the leash tightening idea.
+ * VERIDICT — trust degradation (DISABLED for local study)
+ *
+ * `src/agent/index.ts` does not import this module while studying.
  */
 
+/*
 let delegationGapViolations = 0;
 
 export function recordDelegationGapHardBlock(): void {
@@ -22,11 +24,27 @@ export function getTrustLevel(): TrustLevel {
   return "High";
 }
 
-/** Scale policy max trade USD by trust (High 100%, Medium −30%, Low −60%, Frozen 0). */
 export function effectiveMaxTradeUsd(baseMax: number): number {
   const lvl = getTrustLevel();
   if (lvl === "Frozen") return 0;
   if (lvl === "Low") return baseMax * 0.4;
   if (lvl === "Medium") return baseMax * 0.7;
+  return baseMax;
+}
+*/
+
+export type TrustLevel = "High" | "Medium" | "Low" | "Frozen";
+
+export function recordDelegationGapHardBlock(): void {}
+
+export function getDelegationGapViolations(): number {
+  return 0;
+}
+
+export function getTrustLevel(): TrustLevel {
+  return "High";
+}
+
+export function effectiveMaxTradeUsd(baseMax: number): number {
   return baseMax;
 }

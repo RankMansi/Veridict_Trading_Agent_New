@@ -83,31 +83,11 @@ Output for a HOLD:
 
 ---
 
-## Swapping in an LLM (optional)
+## Swapping in your own strategy (optional)
 
-The demo runs `MomentumStrategy` — no LLM involved. Reasoning is generated directly from price arithmetic ([`src/agent/strategy.ts` L61–L72](https://github.com/Stephen-Kimoi/ai-trading-agent-template/blob/main/src/agent/strategy.ts#L61-L72)). That's intentional: the template works out of the box without any API keys beyond Kraken.
+The demo runs `MomentumStrategy` — reasoning comes from price arithmetic in [`src/agent/strategy.ts`](https://github.com/Stephen-Kimoi/ai-trading-agent-template/blob/main/src/agent/strategy.ts). Add a class that implements `TradingStrategy` (`analyze(market) → TradeDecision`), then instantiate it at the bottom of [`src/agent/index.ts`](https://github.com/Stephen-Kimoi/ai-trading-agent-template/blob/main/src/agent/index.ts).
 
-When you're ready to replace the strategy with a model, the codebase includes a ready-to-wire `LLMStrategy` stub at [`src/agent/strategy.ts` L90–L135](https://github.com/Stephen-Kimoi/ai-trading-agent-template/blob/main/src/agent/strategy.ts#L90-L135):
-
-```typescript
-// const response = await this.client.messages.create({
-//   model: "claude-sonnet-4-6",
-//   max_tokens: 500,
-//   messages: [{
-//     role: "user",
-//     content: `You are a crypto trading agent. Here is the current market data:
-//       Pair: ${data.pair}
-//       Price: $${data.price}
-//       24h High: $${data.high}, Low: $${data.low}
-//       Volume: ${data.volume}
-//       VWAP: $${data.vwap}
-//
-//       Respond with JSON: { action: "BUY"|"SELL"|"HOLD", amount: number, confidence: 0-1, reasoning: string }`
-//   }]
-// });
-```
-
-Uncomment and fill in your client — the `reasoning` field in the JSON response maps directly to `TradeDecision.reasoning`. The key constraint: **reasoning must reference actual market data values** (price, volume, VWAP). This makes the explanation auditable — anyone can cross-check the claim against the historical market data.
+If you call an external model, map its output to `action`, `amount`, `confidence`, and `reasoning`. **Reasoning should reference actual market fields** (price, volume, VWAP) so checkpoints stay auditable.
 
 ---
 

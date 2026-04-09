@@ -40,10 +40,12 @@ const ROUTER_ABI = [
   "event TradeIntentSubmitted(uint256 indexed agentId, bytes32 indexed intentHash, string pair, string action, uint256 amountUsdScaled)",
 ];
 
+/** Use postAttestation(EIP712, empty proof) — shared Sepolia postEIP712Attestation reverts (this.postAttestation msg.sender bug). */
 const VALIDATION_ABI = [
-  "function postEIP712Attestation(uint256 agentId, bytes32 checkpointHash, uint8 score, string notes) external",
+  "function postAttestation(uint256 agentId, bytes32 checkpointHash, uint8 score, uint8 proofType, bytes proof, string notes) external",
   "function getAverageValidationScore(uint256 agentId) external view returns (uint256)",
 ];
+const PROOF_TYPE_EIP712 = 1;
 
 const REPUTATION_ABI = [
   "function submitFeedback(uint256 agentId, uint8 score, bytes32 outcomeRef, string comment, uint8 feedbackType) external",
@@ -270,10 +272,12 @@ async function main() {
       });
       const checkpointHash = ethers.keccak256(ethers.toUtf8Bytes(checkpointData));
 
-      const valTx = await validation.postEIP712Attestation(
+      const valTx = await validation.postAttestation(
         agentId,
         checkpointHash,
         trade.score,
+        PROOF_TYPE_EIP712,
+        "0x",
         trade.note
       );
       await valTx.wait();

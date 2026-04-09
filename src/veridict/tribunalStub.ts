@@ -1,10 +1,10 @@
 /**
- * VERIDICT — ORACLE Tribunal placeholder for the TypeScript template.
- * The full adversarial prosecution / defense / 3-judge flow with IPFS artifacts
- * lives in the Python VERIDICT stack; here we record how the mechanical gate
- * would feed prosecution charges and emit a short audit string for checkpoints.
+ * VERIDICT — ORACLE Tribunal stub (DISABLED for local study)
+ *
+ * `src/agent/index.ts` does not import this module while studying.
  */
 
+/*
 import type { TradeDecision } from "../types/index";
 import type { GateResult } from "./policyGate";
 
@@ -47,5 +47,21 @@ export function oracleTribunalVerdict(
   return {
     execute: true,
     record: `${prosecution} ${defense} ${votes}`,
+  };
+}
+*/
+
+import type { TradeDecision } from "../types/index";
+import type { GateResult } from "./policyGate";
+
+export interface TribunalOutcome {
+  execute: boolean;
+  record: string;
+}
+
+export function oracleTribunalVerdict(_decision: TradeDecision, _gate: GateResult): TribunalOutcome {
+  return {
+    execute: true,
+    record: "VERIDICT tribunal layer disabled (study mode)",
   };
 }

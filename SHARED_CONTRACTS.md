@@ -103,18 +103,23 @@ Listen for `TradeApproved` or `TradeRejected` events to confirm the outcome.
 
 ### Step 5 — Post checkpoints to ValidationRegistry
 
-After every decision, post a signed checkpoint so validators can score your agent's reasoning:
+After every decision, post a signed checkpoint so validators can score your agent's reasoning.
+
+**Important (shared Sepolia):** The deployed `postEIP712Attestation` helper reverts for whitelisted operators (it calls `this.postAttestation`, so `msg.sender` inside the inner call is the contract). Call **`postAttestation`** with **`proofType = 1` (EIP712)** and **`proof = 0x`** (empty bytes):
 
 ```typescript
-await validationRegistry.postEIP712Attestation(
+const PROOF_TYPE_EIP712 = 1;
+await validationRegistry.postAttestation(
   agentId,
   checkpointHash,  // EIP-712 digest of your checkpoint struct
-  score,           // 0-100
-  notes            // optional string
+  score,             // 0–100
+  PROOF_TYPE_EIP712,
+  "0x",              // empty proof bytes
+  notes              // optional string
 );
 ```
 
-Also write each checkpoint to `checkpoints.jsonl` locally for the full audit trail.
+The Node template’s `ValidationRegistryClient.postCheckpointAttestation()` does this for you. Also write each checkpoint to `checkpoints.jsonl` locally for the full audit trail.
 
 ### Step 6 — Check your reputation score
 
@@ -167,10 +172,12 @@ These are the only functions you need to call. You can paste these ABIs directly
 **ValidationRegistry**
 ```json
 [
+  "function postAttestation(uint256 agentId, bytes32 checkpointHash, uint8 score, uint8 proofType, bytes proof, string notes) external",
   "function postEIP712Attestation(uint256 agentId, bytes32 checkpointHash, uint8 score, string notes) external",
   "function getAverageValidationScore(uint256 agentId) external view returns (uint256)"
 ]
 ```
+Prefer **`postAttestation`** with `proofType=1` (EIP712) and `proof=0x` on shared Sepolia; see Step 5 above.
 
 **ReputationRegistry**
 ```json
@@ -307,14 +314,19 @@ After each trade decision, post a checkpoint hash and score so judges can verify
 
 The `checkpointHash` is the EIP-712 digest of your checkpoint struct. At minimum it should commit to: `agentId`, `timestamp`, `action`, `pair`, `amountUsdScaled`, `priceUsdScaled`, and a `reasoningHash` (keccak256 of your reasoning string).
 
+**Shared Sepolia:** use **`postAttestation`** with `proofType=1` (enum EIP712) and empty `proof` bytes — `postEIP712Attestation` reverts on the live contract for the same reason as in Step 5 (Path A).
+
 ```python
 validation = w3.eth.contract(address="0x92bF63E5C7Ac6980f237a7164Ab413BE226187F1", abi=VALIDATION_REGISTRY_ABI)
 
-tx = validation.functions.postEIP712Attestation(
+# ProofType.EIP712 == 1; proof b"" for EIP-712 attestations
+tx = validation.functions.postAttestation(
     agent_id,
-    checkpoint_hash,   # bytes32 EIP-712 digest
-    85,                # score 0-100
-    "Momentum signal confirmed by volume"
+    checkpoint_hash,
+    85,                      # score 0-100
+    1,                       # ProofType.EIP712
+    b"",                     # empty proof
+    "Momentum signal confirmed by volume",
 ).build_transaction({...})
 ```
 

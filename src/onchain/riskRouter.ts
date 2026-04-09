@@ -15,6 +15,34 @@
 import { ethers } from "ethers";
 import { TradeIntent, SignedTradeIntent } from "../types/index";
 
+function readGasLimitCap(envKey: string, defaultDecimal: string): bigint {
+  const raw = process.env[envKey]?.trim();
+  if (!raw) return BigInt(defaultDecimal);
+  try {
+    const v = raw.startsWith("0x") || raw.startsWith("0X") ? BigInt(raw) : BigInt(raw);
+    return v > 0n ? v : BigInt(defaultDecimal);
+  } catch {
+    return BigInt(defaultDecimal);
+  }
+}
+
+async function gasOverrides(
+  provider: ethers.Provider,
+  txReq: { to: string; data: string; from: string },
+  cap: bigint,
+  floor: bigint
+): Promise<ethers.Overrides> {
+  try {
+    const est = await provider.estimateGas(txReq);
+    const buffered = (est * 125n) / 100n;
+    let g = buffered < floor ? floor : buffered;
+    if (g > cap) g = cap;
+    return { gasLimit: g };
+  } catch {
+    return { gasLimit: cap };
+  }
+}
+
 const RISK_ROUTER_ABI = [
   "function submitTradeIntent((uint256 agentId, address agentWallet, string pair, string action, uint256 amountUsdScaled, uint256 maxSlippageBps, uint256 nonce, uint256 deadline) intent, bytes signature) external returns (bool approved, string reason)",
   "function simulateIntent((uint256 agentId, address agentWallet, string pair, string action, uint256 amountUsdScaled, uint256 maxSlippageBps, uint256 nonce, uint256 deadline) intent) external view returns (bool approved, string reason)",
@@ -150,10 +178,53 @@ export class RiskRouterClient {
       signed.intent.deadline,
     ];
 
-    const result = await this.contract.submitTradeIntent(intentStruct, signed.signature);
+    const runner = this.contract.runner;
+    let overrides: ethers.Overrides = {};
+    if (runner && "getAddress" in runner) {
+      const provider = runner.provider;
+      if (provider) {
+        const signer = runner as ethers.Signer;
+        const from = await signer.getAddress();
+        const pop = await this.contract.submitTradeIntent.populateTransaction(intentStruct, signed.signature);
+        overrides = await gasOverrides(
+          provider,
+          { to: pop.to as string, data: pop.data ?? "0x", from },
+          readGasLimitCap("HACKATHON_GAS_LIMIT_ROUTER", "450000"),
+          180000n
+        );
+      }
+    }
+
+    // State-changing calls return a TransactionResponse — not (bool, string). Decode from receipt events.
+    const tx = await this.contract.submitTradeIntent(intentStruct, signed.signature, overrides);
+    const receipt = await tx.wait();
+    if (!receipt) {
+      return { approved: false, reason: "No receipt from submitTradeIntent", intentHash: signed.intentHash };
+    }
+    if (receipt.status !== 1) {
+      return { approved: false, reason: "submitTradeIntent transaction reverted", intentHash: signed.intentHash };
+    }
+
+    const iface = new ethers.Interface(RISK_ROUTER_ABI);
+    for (const log of receipt.logs) {
+      try {
+        const parsed = iface.parseLog(log);
+        if (!parsed) continue;
+        if (parsed.name === "TradeRejected") {
+          const reason = String((parsed.args as { reason?: string }).reason ?? "");
+          return { approved: false, reason: reason || "(empty rejection reason)", intentHash: signed.intentHash };
+        }
+        if (parsed.name === "TradeApproved") {
+          return { approved: true, reason: "", intentHash: signed.intentHash };
+        }
+      } catch {
+        /* log from another contract */
+      }
+    }
+
     return {
-      approved: result[0],
-      reason: result[1],
+      approved: false,
+      reason: "No TradeApproved/TradeRejected in receipt — check router address / ABI",
       intentHash: signed.intentHash,
     };
   }
@@ -186,12 +257,28 @@ export class RiskRouterClient {
     maxDrawdownBps: number,
     maxTradesPerHour: number
   ): Promise<ethers.TransactionReceipt> {
-    const tx = await this.contract.setRiskParams(
-      agentId,
-      BigInt(Math.round(maxPositionUsd * 100)),
-      BigInt(maxDrawdownBps),
-      BigInt(maxTradesPerHour)
-    );
+    const maxPos = BigInt(Math.round(maxPositionUsd * 100));
+    const dd = BigInt(maxDrawdownBps);
+    const tph = BigInt(maxTradesPerHour);
+
+    const runner = this.contract.runner;
+    let overrides: ethers.Overrides = {};
+    if (runner && "getAddress" in runner) {
+      const provider = runner.provider;
+      if (provider) {
+        const signer = runner as ethers.Signer;
+        const from = await signer.getAddress();
+        const pop = await this.contract.setRiskParams.populateTransaction(agentId, maxPos, dd, tph);
+        overrides = await gasOverrides(
+          provider,
+          { to: pop.to as string, data: pop.data ?? "0x", from },
+          readGasLimitCap("HACKATHON_GAS_LIMIT_ROUTER", "450000"),
+          120000n
+        );
+      }
+    }
+
+    const tx = await this.contract.setRiskParams(agentId, maxPos, dd, tph, overrides);
     return tx.wait();
   }
 

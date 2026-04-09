@@ -24,6 +24,23 @@ Any team can pick this up, swap in their own model or strategy, and run it — t
 
 Etherscan links and Path B (custom stack) interfaces live in [SHARED_CONTRACTS.md](SHARED_CONTRACTS.md).
 
+**ValidationRegistry (operator whitelist):** On shared Sepolia, the template **`postAttestation` (EIP-712 proof type, empty proof)** from your **operator** wallet — not `postEIP712Attestation`, which reverts on the deployed bytecode (`this.postAttestation` breaks `msg.sender`). **`notes`** summarize Delegation Gap, tribunal, and RiskRouter outcome. Set `POST_VALIDATION_ATTESTATION=false` to disable. **`AGENT_VALIDATION_SCORE`** defaults to **100** (or **`auto`**). Local `contracts/ValidationRegistry.sol` matches the hackathon interface and fixes `postEIP712Attestation` for **new** deploys only.
+
+**Sepolia gas (optional):** State-changing calls use **`eth_estimateGas`** with a **22% + 8k** buffer, clamped between per-tx floors and env caps, plus **EIP-1559** (`maxFeePerGas` ≈ `2 × baseFee + priority`) unless `HACKATHON_LEGACY_GAS_PRICE=true`. Disable estimation with `HACKATHON_ESTIMATE_GAS=false`. Caps: `HACKATHON_GAS_LIMIT_*` (see `.env.example`). The agent **preflights** with `simulateIntent` (free `eth_call`) before each `submitTradeIntent` so **risk rejections do not burn gas**. **RiskRouter submits** are paid by the **operator** wallet by default (`PRIVATE_KEY`); the **agent** wallet only **signs** — so you do not need Sepolia ETH on a separate `AGENT_WALLET_PRIVATE_KEY` for router txs.
+
+### Leaderboard scoring — what you can and cannot control
+
+| Signal | Who controls it | Practical notes |
+|--------|-----------------|----------------|
+| **Validation score** | **On-chain attestations** (yours + judges) | Operators may post **EIP-712 attestations** (whitelisted). Scores and **notes** (risk gate / tribunal / router) are visible on-chain and in artifacts. |
+| **Reputation score** | **Judge + external raters** | Operators **cannot** self-rate (contract-enforced). **One feedback per rater per agent** — the judge bot cannot “update” your score on a second pass. |
+| **Trade count** | **You (via RiskRouter)** | Shown as **lifetime** approved `TradeApproved` intents (not a rolling 1h window). More **successful** on-chain approvals → higher count. **Rejected** intents still cost gas if you submit them — preflight reduces that; **rate limits** on the router cap how fast you can grow trades. |
+| **PnL / Kraken track** | **Your strategy + keys** | Per hackathon rules / leaderboard API. |
+
+**Why others show 400+ txs and you show ~60:** they likely ran **longer**, hit **more router approvals** (within `maxTradesPerHour`), and kept the **operator wallet funded**. It is **not** because their transactions use “less gas” per opcode — each approval is similar. **Doing more approved trades uses more total ETH**, not less.
+
+**A realistic “high score” scenario:** register once, **claim vault** if you want display capital, run `npm run run-agent` with a **funded operator** (validation + router gas), keep **`POST_VALIDATION_ATTESTATION` on** so **risk summaries** land in attestation **notes**, avoid **rejected** submits where possible (preflight + policy), and ship **checkpoints.jsonl** plus **hackathon submissions**. You cannot self-rate **reputation**; validation posts should reflect real checkpoints.
+
 ---
 
 ## Architecture
@@ -147,7 +164,7 @@ You'll see output like:
 [agent] BTCUSD @ $66,422.6
 [2026-03-27T11:02:50.000Z] HOLD BTCUSD @ $66,422.60
   Confidence: 50%
-  Reason: No clear momentum (0.09% change vs ±0.04% threshold). Holding current position.
+  Reason: No clear momentum (0.09% change vs ±0.06% threshold). Holding current position.
   Market: bid=66421, ask=66421.1, spread=0.0002%, vol=2764.35
 
 ────────────────────────────────────────────────────────────────────────
@@ -164,7 +181,7 @@ CHECKPOINT — HOLD BTCUSD
 [agent] Checkpoint posted to ValidationRegistry: 0xa6993f19...
 ```
 
-The agent warms up for the first **N** ticks (`MOMENTUM_WINDOW`, default **3**), each tick using **Kraken ticker** (CLI or public REST). Momentum default is **±0.04%** over that window — tune `MOMENTUM_THRESHOLD_PCT` (lower → more trades) and `POLL_INTERVAL_MS` (lower → more on-chain posts, more gas). `TRADE_AMOUNT_USD` is capped at **500** for the shared RiskRouter. The **~$69k** figure in the dashboard is **live spot**, not agent profit.
+The agent warms up for the first 5 ticks (collecting price samples), then evaluates momentum. Defaults: **±0.5%** move over the window (`MOMENTUM_THRESHOLD_PCT`), **BUY** only if spread **< 0.1%** (`MOMENTUM_MAX_SPREAD_PCT`). The **~$69k** figure in the dashboard is the **live BTC/USD spot** from Kraken (REST or CLI), not agent profit. A **downward sparkline** only means the market moved down over recent checkpoints — while on **HOLD** with no position, that is not a trading loss.
 
 **Kraken CLI (mentor alignment):** use **`BTCUSD`** as the pair, **`-o json`**, **`paper buy/sell`** for paper (no `--sandbox` flag), **`order buy` / `order sell`** for live (`KRAKEN_LIVE=true`). See `tutorial/03-kraken-connection.md`.
 
@@ -184,14 +201,9 @@ Paste the printed addresses into `.env`. For a local RiskRouter that supports it
 
 ## Swap in your own strategy
 
-Edit `src/agent/index.ts`:
+**Built-in:** `MomentumStrategy` (momentum on recent ticks; tune `MOMENTUM_THRESHOLD_PCT` in `.env`). Swap by editing the block at the bottom of `src/agent/index.ts` or adding a class in `src/agent/strategy.ts`:
 
 ```typescript
-// Replace this:
-import { MomentumStrategy } from "./strategy.js";
-const strategy = new MomentumStrategy(5, 100);
-
-// With your own:
 import { MyStrategy } from "./my-strategy.js";
 const strategy = new MyStrategy();
 ```
@@ -204,7 +216,7 @@ interface TradingStrategy {
 }
 ```
 
-See `src/agent/strategy.ts` for examples including LLM strategy stubs.
+See `src/agent/strategy.ts` for `MomentumStrategy`.
 
 ---
 

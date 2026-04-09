@@ -1,8 +1,11 @@
 /**
- * VERIDICT — Delegation Gap Sentinel (mechanical layer, template subset).
- * Hard blocks are non-bypassable; soft flags feed the tribunal stub.
+ * VERIDICT — Delegation Gap Sentinel (DISABLED for local study)
+ *
+ * `src/agent/index.ts` does not import this module while studying. Restore behaviour by
+ * uncommenting the block below and re-adding imports in `index.ts`.
  */
 
+/*
 import type { TradeDecision } from "../types/index";
 import { effectiveMaxTradeUsd, getTrustLevel } from "./trustState";
 
@@ -64,4 +67,27 @@ export function runDelegationGapSentinel(
   }
 
   return { hardBlock: false, softFlags, findings };
+}
+*/
+
+import type { TradeDecision } from "../types/index";
+
+/** Stubs — keep types for tooling; agent `index.ts` does not import while studying. */
+export interface GateResult {
+  hardBlock: boolean;
+  softFlags: string[];
+  findings: string[];
+}
+
+export interface PolicyOptions {
+  allowedPairs: Set<string>;
+  maxTradeUsd: number;
+}
+
+export function loadPolicyFromEnv(): PolicyOptions {
+  return { allowedPairs: new Set(), maxTradeUsd: 500 };
+}
+
+export function runDelegationGapSentinel(_decision: TradeDecision, _policy: PolicyOptions): GateResult {
+  return { hardBlock: false, softFlags: [], findings: [] };
 }
