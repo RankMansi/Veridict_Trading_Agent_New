@@ -1,4 +1,4 @@
-# AI Trading Agent Template
+# AI Trading Agent - Veridict
 
 A complete, reusable AI trading agent with:
 - **On-chain identity** via ERC-8004 Agent Registry (Sepolia)
